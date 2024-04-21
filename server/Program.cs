@@ -13,6 +13,7 @@ class Program
 {
     static void Main(string[] args)
     {
+        Console.WriteLine("server trying to start");
         ServerUDP sUDP = new ServerUDP();
         sUDP.start();
     }

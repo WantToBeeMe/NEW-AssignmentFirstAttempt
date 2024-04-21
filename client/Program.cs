@@ -10,6 +10,7 @@ class Program
 {
     static void Main(string[] args)
     {
+        Console.WriteLine("client trying to start");
         ClientUDP cUDP = new ClientUDP();
         cUDP.start();
     }
