@@ -7,8 +7,11 @@ using System.Text;
 using System.Text.Json;
 using MessageNS;
 
+// Students:
+// student 1: Dirk Roosendaal - 1031349
+// student 2:
 
-// Do not modify this class
+// do not modify this class
 class Program
 {
     static void Main(string[] args)
@@ -24,8 +27,8 @@ class ServerUDP
     //TODO: create all needed objects for your sockets 
     private const int PORT = 32000; // port of the server
     private const int BUFFER_SIZE = 1024;
-    private const int DATA_CHUNK_SIZE = 100;
-    private const int TIMEOUT_MS = 1000;
+    //private const int DATA_CHUNK_SIZE = 100;
+    //private const int TIMEOUT_MS = 1000;
     
     private Socket socket;
     private IPEndPoint clientEndPoint;
@@ -33,25 +36,20 @@ class ServerUDP
     private int currentWindowSize;
     private int nextDataMessageId;
     
-    // Do not put all the logic into one method. Create multiple methods to handle different tasks.
     public void start()
     {   //DIRK: for some reason this methods name is uncapitalized, just leave it as is
-        //DIRK: any comment not written with DIRK or ISSAM as prefix is not written by us and should not be removed
+        //DIRK: any comment not written with DIRK or ISSAM is a note that should be deleted later
         
         socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         socket.Bind(new IPEndPoint(IPAddress.Any, PORT));
         
-        //DIRK: investigate if we are allowed to use CancellationTokenSource. and even if we should use it
-        //      now it just does this forever which is good enough for now, but obviously we should not do this in the real submission
-        while (true)
-        {
-            RecieveClientMessage();
-        }
+        // ASSIGNMENT: The server will always stay online after terminating the operation waiting for a new Hello.
+        while (true) { RecieveMessage(); }
     }
-
+    
     //TODO: keep receiving messages from clients
     // you can call a dedicated method to handle each received type of messages
-    private void RecieveClientMessage()
+    private void RecieveMessage()
     {
         EndPoint remoteEndPoint = new IPEndPoint(IPAddress.Any, 0);
         byte[] data = new byte[BUFFER_SIZE];
@@ -61,16 +59,13 @@ class ServerUDP
             );
         if (message == null)
         {
-            Console.WriteLine("Failed to deserialize message.");
+            HandleError("Failed to deserialize message", true);
             return;
-            //DIRK: Investigate what we should do if the message failst to deserialize, aka in this code block
-            //      should we then just ignore this message? at least we should let the server know right, or maybe send error back to cleint?
-            //      i think any error should be reported to the client right? 
         }
         switch (message.Type)
         {
             case MessageType.Hello:
-                HandleHelloMessage(message, remoteEndPoint);
+                RecieveHelloMessage(message, remoteEndPoint);
                 break;
             case MessageType.RequestData:
                 Console.WriteLine("Received RequestData");
@@ -79,25 +74,26 @@ class ServerUDP
                 Console.WriteLine("Received Ack");
                 break;
             case MessageType.Error:
-                Console.WriteLine("Received Error");
-                break;
+                HandleError($"Received Error message from client '{message.Content}'", false);
+                return; //DIRK: return serves same purpose as break atm (like the breaks you see above), but if a future dev adds code under the switch, it will also prevent that code from running 
             default:
-                Console.WriteLine("Received unknown message type");
-                break;
+                HandleError($"Received unexpected message type '{message.Type}' with content '{message.Content}'", true);
+                return;
         }
     }
 
     //TODO: [Receive Hello]
-    private void HandleHelloMessage(Message message, EndPoint remoteEndPoint)
+    private void RecieveHelloMessage(Message message, EndPoint remoteEndPoint)
     {
+        // DIRK: this might need to be rewored or combined with the RecieveMessage method
+        //       its because there can only be 1 client at a time to be comunicated with
+        //       so if the message is Hello, it should set the clientEndPoint, and otherwise it should throw an error
         Console.WriteLine("Received Hello message from client.");
-        Console.WriteLine(message);
         clientEndPoint = (IPEndPoint)remoteEndPoint;
+        Console.WriteLine(clientEndPoint);
         if (!int.TryParse(message.Content, out slowStartThreshold))
         {
-            Console.WriteLine("Invalid slow start threshold");
-            //DIRK: Investigate what we should do if there is no threshold given, aka in this code block
-            //      should we then just ignore this message? or set a default? or something else? 
+            HandleError("Failed to parse slow start threshold", true);
         }
         currentWindowSize = 1;
         nextDataMessageId = 1;
@@ -107,6 +103,7 @@ class ServerUDP
     //TODO: [Send Welcome]
     private void SendWelcomeMessage()
     {
+        // ASSIGNMENT-PROTOCOL 2. The server replies with a Welcome-message 
         Message welcomeMessage = new Message { Type = MessageType.Welcome };
         byte[] data = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(welcomeMessage));
         socket.SendTo(data, clientEndPoint);
@@ -121,6 +118,20 @@ class ServerUDP
     //TODO: [End sending data to client]
 
     //TODO: [Handle Errors]
+    private void HandleError(string description,  bool notifyClient)
+    {
+        Console.WriteLine($"Error: {description}");
 
-    //TODO: create all needed methods to handle incoming messages
+        if (notifyClient)
+        {
+            Message errorMessage = new Message { Type = MessageType.Error, Content = description };
+            byte[] data = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(errorMessage));
+            socket.SendTo(data, clientEndPoint);
+        }
+
+        currentWindowSize = 1;
+        nextDataMessageId = 1;
+        slowStartThreshold = 0;
+        clientEndPoint = null;
+    }
 }
