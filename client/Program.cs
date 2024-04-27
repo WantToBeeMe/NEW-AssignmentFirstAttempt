@@ -30,7 +30,7 @@ class ClientUDP
     //private const int TIMEOUT_MS = 1000;
     
     private Socket socket;
-    private IPEndPoint serverEndPoint;
+    private EndPoint serverEndPoint;
     private int currentWindowSize;
     private int nextExpectedMessageId;
     
@@ -46,26 +46,25 @@ class ClientUDP
         
         SendHelloMessage();
         ReceiveWelcomeMessage();
-        SendRequestDataMessage("myFile.txt");
+        SendRequestDataMessage("hamlet.txt");
     }
     
     private Message ReceiveMessage()
     {
         // DIRK: not sure if the endpoint is always the same
         //       anyhow, we for sure need to make some generic method so we can filter out the error messages
-        EndPoint remoteEndPoint = new IPEndPoint(IPAddress.Any, 0);
         byte[] data = new byte[BUFFER_SIZE];
-        int bytesReceived = socket.ReceiveFrom(data, ref remoteEndPoint);
+        int bytesReceived = socket.ReceiveFrom(data, ref serverEndPoint);
         Message? message = JsonSerializer.Deserialize<Message>(
             Encoding.UTF8.GetString(data, 0, bytesReceived)
             );
-        
+  
         if (message == null) 
-            HandleError("Failed to deserialize message.", true);
-        if(message.Type == MessageType.Error) 
-            HandleError($"Received Error message from server '{message.Content}'", false);
+            ThrowError("Failed to deserialize message.", true);
+        if(message?.Type == MessageType.Error) 
+            ThrowError($"Received Error message from server '{message.Content}'", false);
         
-        return message;
+        return message!;
     }
  
     //TODO: [Send Hello message]
@@ -84,7 +83,7 @@ class ClientUDP
     {
         Message message = ReceiveMessage();
         if (message.Type != MessageType.Welcome) 
-            HandleError($"Expected Welcome message, but received {message.Type}", true);
+            ThrowError($"Expected Welcome message, but received {message.Type}", true);
         
         Console.WriteLine("Received Welcome message from server.");
     }
@@ -107,12 +106,12 @@ class ClientUDP
     //TODO: [Send End]
     
     //TODO: [Handle Errors]
-    private void HandleError(string description, bool notifyServer)
+    /* ASSIGNMENT: The Error message is there to communicate to either of the other party that there was an error,
+         please be specific about what is the error in the content of the message. Upon reception of an
+         error, the server will reset the communication (and be ready again). The client will terminate
+         printing the error */
+    private void ThrowError(string description, bool notifyServer)
     {
-        /* ASSIGNMENT: The Error message is there to communicate to either of the other party that there was an error,
-            please be specific about what is the error in the content of the message. Upon reception of an
-            error, the server will reset the communication (and be ready again). The client will terminate
-            printing the error */
         Console.WriteLine($"Error: {description}");
 
         if (notifyServer)
@@ -122,6 +121,7 @@ class ClientUDP
             socket.SendTo(data, serverEndPoint);
         }
         
+        socket.Close();
         Environment.Exit(0);
     }
 }
