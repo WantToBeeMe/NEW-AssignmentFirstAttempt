@@ -25,21 +25,21 @@ class ClientUDP
     //TODO: create all needed objects for your sockets 
     private const int PORT = 32000; //port of the server
     private const string SERVER_IP = "127.0.0.1";
-    private const int THRESHOLD = 20;
     private const int BUFFER_SIZE = 1024;
+    private const int WINDOWSIZE_THRESHOLD = 20;
     //private const int TIMEOUT_MS = 1000;
     
     private Socket socket;
     private EndPoint serverEndPoint;
     private int currentWindowSize;
-    private int nextExpectedMessageId;
+    private Dictionary<int, string> receivedMessages;
     
     public void start()
     {   //DIRK: for some reason this methods name is uncapitalized, just leave it as is
         //DIRK: any comment not written with DIRK or ISSAM is a note that should be deleted later
         
         currentWindowSize = 1;
-        nextExpectedMessageId = 1;
+        receivedMessages = new Dictionary<int, string>();
         
         socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         serverEndPoint = new IPEndPoint(IPAddress.Parse(SERVER_IP), PORT);
@@ -47,9 +47,19 @@ class ClientUDP
         SendHelloMessage();
         ReceiveWelcomeMessage();
         SendRequestDataMessage("hamlet.txt");
+
+       while (true) 
+           ReceiveDataMessage();
+       
     }
-    
-    private Message ReceiveMessage()
+
+    private void SendMessage(MessageType type, string? content = null)
+    {
+        Message message = new Message { Type = type, Content = content };
+        byte[] data = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message));
+        socket.SendTo(data, serverEndPoint);
+    }
+    private Message ReceiveMessage(MessageType expectedType)
     {
         // DIRK: not sure if the endpoint is always the same
         //       anyhow, we for sure need to make some generic method so we can filter out the error messages
@@ -61,10 +71,21 @@ class ClientUDP
   
         if (message == null) 
             ThrowError("Failed to deserialize message.", true);
-        if(message?.Type == MessageType.Error) 
+        if(message!.Type == MessageType.Error) 
             ThrowError($"Received Error message from server '{message.Content}'", false);
+        if (expectedType == MessageType.Data && message.Type == MessageType.End)
+            return message; // When we as a client want to receive Data, we can also expect an End message at any point in time
         
-        return message!;
+        if (message.Type != expectedType) 
+            ThrowError($"Expected {expectedType} message, but received {message.Type}", true);
+
+        if (message.Type != MessageType.End && message.Type != MessageType.Welcome)
+        { // END and WELCOME are the only 2 message types that dont have content
+            if (string.IsNullOrEmpty(message.Content)) 
+                ThrowError("Received empty message, expected there to be content", true);
+        }
+       
+        return message;
     }
  
     //TODO: [Send Hello message]
@@ -72,19 +93,14 @@ class ClientUDP
     {
         // ASSIGNMENT-PROTOCOL 1. The client sends a Hello-message to the server,
         //      including the threshold for the slow start in the content section.
-        Message helloMessage = new Message { Type = MessageType.Hello, Content = THRESHOLD.ToString() };
-        byte[] data = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(helloMessage));
-        socket.SendTo(data, serverEndPoint);
+        SendMessage(MessageType.Hello, WINDOWSIZE_THRESHOLD.ToString());
         Console.WriteLine("Sent Hello message to server.");
     }
     
     //TODO: [Receive Welcome]
     private void ReceiveWelcomeMessage()
     {
-        Message message = ReceiveMessage();
-        if (message.Type != MessageType.Welcome) 
-            ThrowError($"Expected Welcome message, but received {message.Type}", true);
-        
+        ReceiveMessage(MessageType.Welcome);
         Console.WriteLine("Received Welcome message from server.");
     }
     
@@ -92,18 +108,39 @@ class ClientUDP
     private void SendRequestDataMessage(string fileName)
     {
         // ASSIGNMENT-PROTOCOL 3. The client sends a RequestData-message
-        Message requestDataMessage = new Message { Type = MessageType.RequestData, Content = fileName };
-        byte[] data = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(requestDataMessage));
-        socket.SendTo(data, serverEndPoint);
+        SendMessage(MessageType.RequestData, fileName);
         Console.WriteLine("Sent RequestData message to server.");
     }
     
     
     //TODO: [Receive Data]
+    private void ReceiveDataMessage()
+    {
+        Message message = ReceiveMessage(MessageType.Data);
+        if (message.Type == MessageType.End)
+            EndConnection();
+        
+        if (message.Content!.Length < 4) 
+            ThrowError("Received Data message with invalid content", true);
+        if (!int.TryParse(message.Content.Substring(0, 4), out int ackIndex)) 
+            ThrowError("Received Data message with invalid index", true);
+        string content = message.Content!.Substring(4);
 
-    //TODO: [Send RequestData]
+        // receiving the same ack should be possible (otherwise its quite impossible to resend window)
+        //if (receivedMessages.ContainsKey(ackIndex))
+        //    ThrowError("Received Data that was already send", true);
 
-    //TODO: [Send End]
+        receivedMessages[ackIndex] = content;
+        Console.WriteLine($"Received Data message with index {ackIndex}");
+        SendMessage(MessageType.Ack, ackIndex.ToString());
+    }
+    
+    private void EndConnection()
+    {
+        Console.WriteLine("Connection to the server will be ended, file download complete!");
+        socket.Close();
+        Environment.Exit(0);
+    }
     
     //TODO: [Handle Errors]
     /* ASSIGNMENT: The Error message is there to communicate to either of the other party that there was an error,
@@ -113,13 +150,8 @@ class ClientUDP
     private void ThrowError(string description, bool notifyServer)
     {
         Console.WriteLine($"Error: {description}");
-
         if (notifyServer)
-        {
-            Message errorMessage = new Message { Type = MessageType.Error, Content = description };
-            byte[] data = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(errorMessage));
-            socket.SendTo(data, serverEndPoint);
-        }
+            SendMessage(MessageType.Error, description);
         
         socket.Close();
         Environment.Exit(0);
