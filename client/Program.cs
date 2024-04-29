@@ -31,14 +31,14 @@ class ClientUDP
     
     private Socket socket;
     private EndPoint serverEndPoint;
-    private int currentWindowSize;
     private Dictionary<int, string> receivedMessages;
+    private bool receivingData;
     
     public void start()
     {   //DIRK: for some reason this methods name is uncapitalized, just leave it as is
         //DIRK: any comment not written with DIRK or ISSAM is a note that should be deleted later
         
-        currentWindowSize = 1;
+        receivingData = true;
         receivedMessages = new Dictionary<int, string>();
         
         socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
@@ -48,9 +48,9 @@ class ClientUDP
         ReceiveWelcomeMessage();
         SendRequestDataMessage("hamlet.txt");
 
-       while (true) 
+       while (receivingData) 
            ReceiveDataMessage();
-       
+       EndConnection();
     }
 
     private void SendMessage(MessageType type, string? content = null)
@@ -61,8 +61,6 @@ class ClientUDP
     }
     private Message ReceiveMessage(MessageType expectedType)
     {
-        // DIRK: not sure if the endpoint is always the same
-        //       anyhow, we for sure need to make some generic method so we can filter out the error messages
         byte[] data = new byte[BUFFER_SIZE];
         int bytesReceived = socket.ReceiveFrom(data, ref serverEndPoint);
         Message? message = JsonSerializer.Deserialize<Message>(
@@ -118,7 +116,10 @@ class ClientUDP
     {
         Message message = ReceiveMessage(MessageType.Data);
         if (message.Type == MessageType.End)
-            EndConnection();
+        {
+            receivingData = false;
+            return;
+        }
         
         if (message.Content!.Length < 4) 
             ThrowError("Received Data message with invalid content", true);
