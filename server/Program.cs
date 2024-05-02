@@ -206,17 +206,6 @@ class ServerUDP
         for (int i = 0; i < currentWindowSize; i++)
             allDataSent = !SendSingleDataMessage(nextDataMessageId+i);
         
-        while(acksToReceive.Count != 0)
-            ReceiveAckMessage();
-        
-        nextDataMessageId += currentWindowSize;
-        currentWindowSize = Math.Min(currentWindowSize * 2, slowStartThreshold);
-        
-        //DIRK: Implement the timout here. If the server did not receive all the acks in time:
-        //      - reset the window size to 1
-        //      - set the nextDataMessageId to the lowest number in the acksToReceive list (which is the first ack that was not received)
-        //      - set allDataSent to false
-        // that's all you have to do (literally (re)set 3 variables), since if you reset it correctly, the next loop will follow since allDataSent is false, and thus it will follow where we left off.
         while (acksToReceive.Count != 0)
             {
                 ReceiveAckMessage();
@@ -236,6 +225,16 @@ class ServerUDP
                     break; // Exit the loop
                 }
             }
+        
+        nextDataMessageId += currentWindowSize;
+        currentWindowSize = Math.Min(currentWindowSize * 2, slowStartThreshold);
+        
+        //DIRK: Implement the timout here. If the server did not receive all the acks in time:
+        //      - reset the window size to 1
+        //      - set the nextDataMessageId to the lowest number in the acksToReceive list (which is the first ack that was not received)
+        //      - set allDataSent to false
+        // that's all you have to do (literally (re)set 3 variables), since if you reset it correctly, the next loop will follow since allDataSent is false, and thus it will follow where we left off.
+        
     }
     
     //TODO: [Send End]

@@ -33,7 +33,7 @@ class ClientUDP
     private EndPoint serverEndPoint;
     private Dictionary<int, string> receivedMessages;
     private bool receivingData;
-    
+
     public void start()
     {   //DIRK: for some reason this methods name is uncapitalized, just leave it as is
         //DIRK: any comment not written with DIRK or ISSAM is a note that should be deleted later
@@ -44,6 +44,7 @@ class ClientUDP
         socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         serverEndPoint = new IPEndPoint(IPAddress.Parse(SERVER_IP), PORT);
         
+
         SendHelloMessage();
         ReceiveWelcomeMessage();
         SendRequestDataMessage("hamlet.txt");
