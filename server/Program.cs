@@ -210,19 +210,19 @@ class ServerUDP
             {
                 ReceiveAckMessage();
 
-                // Check if the timeout has elapsed
-                if ((DateTime.Now - windowSentTime).TotalMilliseconds > 1000) // Assuming a 1-second timeout
+                // Check the timeout 
+                if ((DateTime.Now - windowSentTime).TotalMilliseconds > 1000) // 1 sec timeout
                 {
-                    // Reset the window size
+                    // Reset the window 
                     currentWindowSize = 1;
 
                     // Set nextDataMessageId to the lowest missing ACK
                     nextDataMessageId = acksToReceive.Min();
 
-                    // Set allDataSent to false to continue sending data
+                    // Set allDataSent to false to continue sending data :)
                     allDataSent = false;
 
-                    break; // Exit the loop
+                    break;
                 }
             }
         
