@@ -9,7 +9,7 @@ using MessageNS;
 
 // Students:
 // student 1: Dirk Roosendaal - 1031349
-// student 2:
+// student 2: Issam Ben Massoud - 1055156
 
 // do not modify this class
 class Program
@@ -41,6 +41,8 @@ class ServerUDP
     private int nextDataMessageId; // this-1 is last successfully recieved message. This means that if its missing an ack, the server will start from this message again.
     private bool allDataSent;
     private List<int> acksToReceive = new(); // this is a list of all the acks that we are still waiting for.
+
+    private DateTime windowSentTime; // this is the time when the window was last sent, this is used to check if we need to reset the window size.
     
     public void start()
     {   //DIRK: for some reason this methods name is uncapitalized, just leave it as is
@@ -200,6 +202,7 @@ class ServerUDP
     {
         Console.WriteLine($"SENDING WINDOW ({currentWindowSize}): {nextDataMessageId} - {(nextDataMessageId + currentWindowSize)}");
         acksToReceive.Clear();
+        windowSentTime = DateTime.Now; // this is the time when the window was last sent, this is used to check if we need to reset the window size.
         for (int i = 0; i < currentWindowSize; i++)
             allDataSent = !SendSingleDataMessage(nextDataMessageId+i);
         
@@ -214,6 +217,25 @@ class ServerUDP
         //      - set the nextDataMessageId to the lowest number in the acksToReceive list (which is the first ack that was not received)
         //      - set allDataSent to false
         // that's all you have to do (literally (re)set 3 variables), since if you reset it correctly, the next loop will follow since allDataSent is false, and thus it will follow where we left off.
+        while (acksToReceive.Count != 0)
+            {
+                ReceiveAckMessage();
+
+                // Check if the timeout has elapsed
+                if ((DateTime.Now - windowSentTime).TotalMilliseconds > 1000) // Assuming a 1-second timeout
+                {
+                    // Reset the window size
+                    currentWindowSize = 1;
+
+                    // Set nextDataMessageId to the lowest missing ACK
+                    nextDataMessageId = acksToReceive.Min();
+
+                    // Set allDataSent to false to continue sending data
+                    allDataSent = false;
+
+                    break; // Exit the loop
+                }
+            }
     }
     
     //TODO: [Send End]

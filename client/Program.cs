@@ -7,7 +7,7 @@ using MessageNS;
 
 // Students:
 // student 1: Dirk Roosendaal - 1031349
-// student 2:
+// student 2: Issam Ben massoud - 1055156
 
 // do not modify this class
 class Program
@@ -109,6 +109,21 @@ class ClientUDP
         SendMessage(MessageType.RequestData, fileName);
         Console.WriteLine("Sent RequestData message to server.");
     }
+
+    private void WriteDataToFile()
+        {
+            // Sort the received messages
+            var sortedMessages = receivedMessages.OrderBy(x => x.Key);
+
+            // Combine the message contents into a single string
+            var fileContent = string.Concat(sortedMessages.Select(x => x.Value));
+
+            // Write the file content to a file in the project directory
+            var filePath = Path.Combine(AppContext.BaseDirectory, "hamlet_received.txt");
+            File.WriteAllText(filePath, fileContent);
+
+            Console.WriteLine($"File content written to '{filePath}'");
+        }
     
     
     //TODO: [Receive Data]
@@ -117,6 +132,7 @@ class ClientUDP
         Message message = ReceiveMessage(MessageType.Data);
         if (message.Type == MessageType.End)
         {
+            WriteDataToFile();
             receivingData = false;
             return;
         }
