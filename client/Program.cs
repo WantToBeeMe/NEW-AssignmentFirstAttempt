@@ -23,11 +23,14 @@ class ClientUDP
 {
     //TODO: implement all necessary logic to create sockets and handle incoming messages
     //TODO: create all needed objects for your sockets 
-    private const int PORT = 32000; //port of the server
+    private const string REQUESTED_FILE = "hamlet.txt";
+    private const int PORT = 32000;
     private const string SERVER_IP = "127.0.0.1";
     private const int BUFFER_SIZE = 1024;
     private const int WINDOWSIZE_THRESHOLD = 20;
-    //private const int TIMEOUT_MS = 1000;
+    private const int DATA_TIMEOUT_MS = 5000;
+    // Assignment: Long timeout should be used to terminate activities in case something else has gone wrong and no activity is detected
+    // TODO: check if this longtimeout should be used everywhere, or only at the data receive
     
     private Socket socket;
     private EndPoint serverEndPoint;
@@ -35,19 +38,16 @@ class ClientUDP
     private bool receivingData;
 
     public void start()
-    {   //DIRK: for some reason this methods name is uncapitalized, just leave it as is
-        //DIRK: any comment not written with DIRK or ISSAM is a note that should be deleted later
-        
+    {
         receivingData = true;
         receivedMessages = new Dictionary<int, string>();
         
         socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         serverEndPoint = new IPEndPoint(IPAddress.Parse(SERVER_IP), PORT);
         
-
         SendHelloMessage();
         ReceiveWelcomeMessage();
-        SendRequestDataMessage("hamlet.txt");
+        SendRequestDataMessage(REQUESTED_FILE);
 
        while (receivingData) 
            ReceiveDataMessage();
@@ -60,28 +60,29 @@ class ClientUDP
         byte[] data = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message));
         socket.SendTo(data, serverEndPoint);
     }
-    private Message ReceiveMessage(MessageType expectedType)
+    private Message ReceiveMessage(MessageType expectedType, int timeout = 0)
     {
         byte[] data = new byte[BUFFER_SIZE];
+        socket.ReceiveTimeout = timeout;
         int bytesReceived = socket.ReceiveFrom(data, ref serverEndPoint);
         Message? message = JsonSerializer.Deserialize<Message>(
             Encoding.UTF8.GetString(data, 0, bytesReceived)
             );
   
         if (message == null) 
-            ThrowError("Failed to deserialize message.", true);
+            HandleError("Failed to deserialize message.", true);
         if(message!.Type == MessageType.Error) 
-            ThrowError($"Received Error message from server '{message.Content}'", false);
+            HandleError($"Received Error message from server '{message.Content}'", false);
         if (expectedType == MessageType.Data && message.Type == MessageType.End)
             return message; // When we as a client want to receive Data, we can also expect an End message at any point in time
         
         if (message.Type != expectedType) 
-            ThrowError($"Expected {expectedType} message, but received {message.Type}", true);
+            HandleError($"Expected {expectedType} message, but received {message.Type}", true);
 
         if (message.Type != MessageType.End && message.Type != MessageType.Welcome)
         { // END and WELCOME are the only 2 message types that dont have content
             if (string.IsNullOrEmpty(message.Content)) 
-                ThrowError("Received empty message, expected there to be content", true);
+                HandleError("Received empty message, expected there to be content", true);
         }
        
         return message;
@@ -90,8 +91,6 @@ class ClientUDP
     //TODO: [Send Hello message]
     private void SendHelloMessage()
     {
-        // ASSIGNMENT-PROTOCOL 1. The client sends a Hello-message to the server,
-        //      including the threshold for the slow start in the content section.
         SendMessage(MessageType.Hello, WINDOWSIZE_THRESHOLD.ToString());
         Console.WriteLine("Sent Hello message to server.");
     }
@@ -106,7 +105,6 @@ class ClientUDP
     //TODO: [Send RequestData]
     private void SendRequestDataMessage(string fileName)
     {
-        // ASSIGNMENT-PROTOCOL 3. The client sends a RequestData-message
         SendMessage(MessageType.RequestData, fileName);
         Console.WriteLine("Sent RequestData message to server.");
     }
@@ -119,18 +117,39 @@ class ClientUDP
             // Combine the message contents into a single string
             var fileContent = string.Concat(sortedMessages.Select(x => x.Value));
 
+            // Create a new file name (by splitting the extension, and inserting a "_received" before it)
+            var lastDotIndex = REQUESTED_FILE.LastIndexOf('.');
+            var fileNameWithoutExtension = REQUESTED_FILE.Substring(0, lastDotIndex);
+            var extension = REQUESTED_FILE.Substring(lastDotIndex);
+            var newFileName = fileNameWithoutExtension + "_received" + extension;
+            
             // Write the file content to a file in the project directory
-            var filePath = Path.Combine(AppContext.BaseDirectory, "hamlet_received.txt");
+            var filePath = Path.Combine(AppContext.BaseDirectory, newFileName);
             File.WriteAllText(filePath, fileContent);
-
-            Console.WriteLine($"File content written to '{filePath}'");
+            
+            Console.WriteLine($"File download complete! written to '{filePath}'");
         }
     
     
     //TODO: [Receive Data]
+    // // FOR TESTING:
+    // private List<int> ignoredAcks = new();
     private void ReceiveDataMessage()
     {
-        Message message = ReceiveMessage(MessageType.Data);
+        Message message;
+        try {
+            message = ReceiveMessage(MessageType.Data, DATA_TIMEOUT_MS);
+        } catch (SocketException ex)
+        {
+            // If the error was not a timeout, we still have to throw it and reset the server.
+            if (ex.SocketErrorCode != SocketError.TimedOut)
+                HandleError(ex.Message, true);
+          
+            Console.WriteLine("Timeout, took too long to receive Data message. terminating program safely.");
+            receivingData = false;
+            return;
+        }
+
         if (message.Type == MessageType.End)
         {
             WriteDataToFile();
@@ -139,33 +158,34 @@ class ClientUDP
         }
         
         if (message.Content!.Length < 4) 
-            ThrowError("Received Data message with invalid content", true);
+            HandleError("Received Data message with invalid content", true);
         if (!int.TryParse(message.Content.Substring(0, 4), out int ackIndex)) 
-            ThrowError("Received Data message with invalid index", true);
+            HandleError("Received Data message with invalid index", true);
         string content = message.Content!.Substring(4);
-
-        // receiving the same ack should be possible (otherwise its quite impossible to resend window)
-        //if (receivedMessages.ContainsKey(ackIndex))
-        //    ThrowError("Received Data that was already send", true);
 
         receivedMessages[ackIndex] = content;
         Console.WriteLine($"Received Data message with index {ackIndex}");
+        
+        // // FOR TESTING:
+        // var ignoring = new List<int> {3};
+        // if(ignoring.Contains(ackIndex) && !ignoredAcks.Contains(ackIndex))
+        // {
+        //     ignoredAcks.Add(ackIndex);
+        //     Console.WriteLine($"Ignoring ack {ackIndex}");
+        //     return;
+        // }
         SendMessage(MessageType.Ack, ackIndex.ToString());
     }
     
     private void EndConnection()
     {
-        Console.WriteLine("Connection to the server will be ended, file download complete!");
+        Console.WriteLine("Connection to the server will be ended");
         socket.Close();
         Environment.Exit(0);
     }
     
     //TODO: [Handle Errors]
-    /* ASSIGNMENT: The Error message is there to communicate to either of the other party that there was an error,
-         please be specific about what is the error in the content of the message. Upon reception of an
-         error, the server will reset the communication (and be ready again). The client will terminate
-         printing the error */
-    private void ThrowError(string description, bool notifyServer)
+    private void HandleError(string description, bool notifyServer)
     {
         Console.WriteLine($"Error: {description}");
         if (notifyServer)

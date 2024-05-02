@@ -25,61 +25,60 @@ class ServerUDP
 {
     //TODO: implement all necessary logic to create sockets and handle incoming messages
     //TODO: create all needed objects for your sockets 
-    private const int PORT = 32000; // port of the server
+    private const int PORT = 32000;
     private const string SERVER_IP = "127.0.0.1";
     private const int BUFFER_SIZE = 1024;
     private const int DATA_CHUNK_SIZE = 100;
-    //private const int TIMEOUT_MS = 1000;
+    private const int ACK_TIMEOUT_MS = 3000;
 
     private string applicationDir;
     
     private Socket socket;
     private EndPoint? clientEndPoint;
-    private string[]? fileContent; // null means no file requested
+    private string[]? fileContent; // null means no file currently being requested
     private int slowStartThreshold;
     private int currentWindowSize;
     private int nextDataMessageId; // this-1 is last successfully recieved message. This means that if its missing an ack, the server will start from this message again.
     private bool allDataSent;
     private List<int> acksToReceive = new(); // this is a list of all the acks that we are still waiting for.
-
-    private DateTime windowSentTime; // this is the time when the window was last sent, this is used to check if we need to reset the window size.
     
     public void start()
-    {   //DIRK: for some reason this methods name is uncapitalized, just leave it as is
-        //DIRK: any comment not written with DIRK or ISSAM is a note that should be deleted later
-       
+    {   
         // DIRK: decide on what to do to get the actual root
         // applicationDir = AppContext.BaseDirectory;
         applicationDir = Path.Combine(AppContext.BaseDirectory, "../../..");
         
         socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         socket.Bind(new IPEndPoint(IPAddress.Parse(SERVER_IP), PORT));
+
+        ResetServer(true);
         
-        currentWindowSize = 1;
-        nextDataMessageId = 1;
-        // ASSIGNMENT: The server will always stay online after terminating the operation waiting for a new Hello.
+        // Assignment: "The server will always stay online after terminating the operation waiting for a new Hello."
+        //    so that's why the infinite loop 
         while (true) {
             try {
                 SingleServerIteration();
             } catch (Exception e) {   
-                //DIRK: for now this catches ALL errors, even the ones we didnt make
-                HandleException(e);
+                // if there is any error (lets say Received Request before Hello), then we throw an error, and catch it here.
+                //  currently we catch ALL errors (even once we didnt make), and reset the server,
+                //  this is because the assignment states that the server should always stay online.
+                //  but a future dev could easily create its own exceptions class and only catch the ones that are thrown by the server.
+                Console.WriteLine($"Error: {e.Message}");
             }
+            ResetServer();
         }
     }
 
     private void SingleServerIteration()
     {
         ReceiveHelloMessage();
-        
-        //TODO: [Send Welcome]
-        SendMessageTo(clientEndPoint!, MessageType.Welcome);
+        SendHelloWelcome();
         ReceiveRequestDataMessage();
-
+        
         allDataSent = false;
         while (!allDataSent)
             SingleAlgorithmStep();
-
+        
         SendEndMessage();
     }
     
@@ -91,7 +90,7 @@ class ServerUDP
     }
 
     //TODO: keep receiving messages from clients
-    private Message ReceiveMessage(MessageType expectedType)
+    private Message ReceiveMessage(MessageType expectedType, int timeout = 0)
     {
         // This message will handle the generic receive message logic (which is the same for all messages)
         // This method will always return a message that you can asure is of the right type , and has content (if that type should have)
@@ -101,6 +100,7 @@ class ServerUDP
         EndPoint remoteEndPoint = expectedType == MessageType.Hello ? new IPEndPoint(IPAddress.Any, 0) : clientEndPoint!;
         
         byte[] data = new byte[BUFFER_SIZE];
+        socket.ReceiveTimeout = timeout;
         int bytesReceived = socket.ReceiveFrom(data, ref remoteEndPoint);
         Message? message = JsonSerializer.Deserialize<Message>(
             Encoding.UTF8.GetString(data, 0, bytesReceived)
@@ -110,7 +110,7 @@ class ServerUDP
             clientEndPoint = remoteEndPoint;
         else if (clientEndPoint != remoteEndPoint)
         {
-            /* ASSIGNMENT: The server will communicate with only one client at a time;
+            /* Assignment: The server will communicate with only one client at a time;
                     it cannot communicate with multiple clients simultaneously; they must interact in sequence.
 
             This is a special error case since it doesn't really make sence to reset the whole server and stop the connection
@@ -127,20 +127,27 @@ class ServerUDP
             But we still do since this is the only Error that can happen before the clientEndPoint var is set!!
             and in our case errors are always send to the client, so we need to know where to send this error aswell */
             clientEndPoint = remoteEndPoint;
-            ThrowError("Failed to deserialize message", true);
+            HandleError("Failed to deserialize message", true);
         }
         
         if(message!.Type == MessageType.Error) 
-            ThrowError($"Received Error message from client '{message.Content}'", false);
+            HandleError($"Received Error message from client '{message.Content}'", false);
         if (message.Type != expectedType) 
-            ThrowError($"Expected {expectedType} message, but received {message.Type}", true);
+            HandleError($"Expected {expectedType} message, but received {message.Type}", true);
         if (message.Type != MessageType.End && message.Type != MessageType.Welcome)
         { // END and WELCOME are the only 2 message types that dont have content
             if (string.IsNullOrEmpty(message.Content)) 
-                ThrowError("Received empty message, expected there to be content", true);
+                HandleError("Received empty message, expected there to be content", true);
         }
        
         return message;
+    }
+
+    //TODO: [Send Welcome]
+    private void SendHelloWelcome()
+    {
+        SendMessageTo(clientEndPoint!, MessageType.Welcome);
+        Console.WriteLine("Sent Welcome message to client.");
     }
     
     //TODO: [Receive Hello]
@@ -148,7 +155,7 @@ class ServerUDP
     {
         Message message = ReceiveMessage(MessageType.Hello);
         if (!int.TryParse(message.Content, out slowStartThreshold))
-            ThrowError("Failed to parse slow start threshold", true);
+            HandleError("Failed to parse slow start threshold", true);
         
         Console.WriteLine($"Received Hello message ({slowStartThreshold})");
     }
@@ -159,7 +166,7 @@ class ServerUDP
         Message message = ReceiveMessage(MessageType.RequestData);
         string filepath = Path.Combine(applicationDir, message.Content!);
         if (!File.Exists(filepath))
-            ThrowError($"File '{message.Content}' not found", true);
+            HandleError($"File '{message.Content}' not found", true);
         
         fileContent = File.ReadAllText(filepath)     // string
             .Chunk(DATA_CHUNK_SIZE)                  // char[][]
@@ -170,16 +177,19 @@ class ServerUDP
     }
  
     //TODO: [Receive Ack]
-    private void ReceiveAckMessage()
+    private void ReceiveAckMessage(int timeout)
     {
-        Message message = ReceiveMessage(MessageType.Ack);
+        Message message = ReceiveMessage(MessageType.Ack, timeout);
         if (!int.TryParse(message.Content, out int ackId))
-            ThrowError("Failed to parse ack id", true);
+            HandleError("Failed to parse ack id", true);
         
         // The assignment only states that missing acks are not errors. But nothing is said about acks that we are not supose to get
-        // But if it turns out we are not supose to throw an error here, we can simply replace this ThrowError() with a return statement.
+        // But if it turns out we are not supose to throw an error here, we can simply do 1 of 2 things:
+        // 1. replace this ThrowError() with a return statement.
+        // 2. completely remove this clause
+        // it is implemented in a way that it does not really matter which of the 3 (thisone included) options you choose.
         if (ackId < nextDataMessageId || ackId > nextDataMessageId + currentWindowSize)
-            ThrowError("Received ack was not send in the current window", true);
+            HandleError("Received ack was not send in the current window", true);
         
         Console.WriteLine($"Received Ack for message {ackId}");
         acksToReceive.Remove(ackId);
@@ -200,41 +210,33 @@ class ServerUDP
     //TODO: [Implement your slow-start algorithm considering the threshold]
     private void SingleAlgorithmStep()
     {
-        Console.WriteLine($"SENDING WINDOW ({currentWindowSize}): {nextDataMessageId} - {(nextDataMessageId + currentWindowSize)}");
+        Console.WriteLine($"SENDING WINDOW ({currentWindowSize}): {nextDataMessageId} - {(nextDataMessageId + currentWindowSize - 1)}");
         acksToReceive.Clear();
-        windowSentTime = DateTime.Now; // this is the time when the window was last sent, this is used to check if we need to reset the window size.
+        
         for (int i = 0; i < currentWindowSize; i++)
             allDataSent = !SendSingleDataMessage(nextDataMessageId+i);
         
-        while (acksToReceive.Count != 0)
+        while (acksToReceive.Count != 0) 
+        {
+            try {
+                ReceiveAckMessage(ACK_TIMEOUT_MS);
+            } catch (SocketException ex) 
             {
-                ReceiveAckMessage();
-
-                // Check the timeout 
-                if ((DateTime.Now - windowSentTime).TotalMilliseconds > 1000) // 1 sec timeout
-                {
-                    // Reset the window 
-                    currentWindowSize = 1;
-
-                    // Set nextDataMessageId to the lowest missing ACK
-                    nextDataMessageId = acksToReceive.Min();
-
-                    // Set allDataSent to false to continue sending data :)
-                    allDataSent = false;
-
-                    break;
-                }
+                // If the error was not a timeout, we still have to throw it and reset the server.
+                if (ex.SocketErrorCode != SocketError.TimedOut)
+                    HandleError(ex.Message, true);
+                
+                currentWindowSize = 1;
+                nextDataMessageId = acksToReceive.Min(); // our next window should start at the first missing ack
+                allDataSent = false;
+                
+                Console.WriteLine($"Timeout, resetting window and start sending from ack: {nextDataMessageId}");
+                return;
             }
+        }
         
         nextDataMessageId += currentWindowSize;
         currentWindowSize = Math.Min(currentWindowSize * 2, slowStartThreshold);
-        
-        //DIRK: Implement the timout here. If the server did not receive all the acks in time:
-        //      - reset the window size to 1
-        //      - set the nextDataMessageId to the lowest number in the acksToReceive list (which is the first ack that was not received)
-        //      - set allDataSent to false
-        // that's all you have to do (literally (re)set 3 variables), since if you reset it correctly, the next loop will follow since allDataSent is false, and thus it will follow where we left off.
-        
     }
     
     //TODO: [Send End]
@@ -245,28 +247,22 @@ class ServerUDP
     }
     
     //TODO: [Handle Errors]
-    /* ASSIGNMENT: The Error message is there to communicate to either of the other party that there was an error,
-           please be specific about what is the error in the content of the message. Upon reception of an
-           error, the server will reset the communication (and be ready again). The client will terminate
-           printing the error */
-    private void ThrowError(string description,  bool notifyClient)
+    private void HandleError(string description,  bool notifyClient)
     {
        if (notifyClient) 
            SendMessageTo(clientEndPoint!, MessageType.Error, description);
        
-       // We throw an error, this then gets caught in the HandleException method
-       // The reason for this is to ensure that all code coming after the error is not executed,
-       //   and this without having to put the return statement in every if clause that checks for an error.
-       // The exception is then caught in the HandleException method, which will reset the server without actually throwing it further,
-       //   which will make the server run normally again in the next iteration of the while loop.
+       // We throw an error, this then gets caught and will reset the server.
+       //   When there is an error, you dont want all the code after it to keep running,
+       //   Throwing and catching errors is easier then using return statements in every if clause that checks for an error.
+       //   and is less prone to bugs since you dont have to remember to add a return statement in every if clause.
        throw new Exception(description);
     }
     
-    private void HandleException(Exception e)
+    private void ResetServer(bool firstTimeStarting = false)
     {
-        Console.WriteLine($"Error: {e.Message}");
-        Console.WriteLine("Resetting server...");
-             
+        if(!firstTimeStarting)
+            Console.WriteLine("Resetting server...");
         currentWindowSize = 1;
         nextDataMessageId = 1;
         slowStartThreshold = 0;
