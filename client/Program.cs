@@ -1,5 +1,4 @@
-﻿using System.ComponentModel;
-using System.Net;
+﻿using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
@@ -29,9 +28,7 @@ class ClientUDP
     private const int BUFFER_SIZE = 1024;
     private const int WINDOWSIZE_THRESHOLD = 20;
     private const int DATA_TIMEOUT_MS = 5000;
-    // Assignment: Long timeout should be used to terminate activities in case something else has gone wrong and no activity is detected
-    // TODO: check if this longtimeout should be used everywhere, or only at the data receive
-    
+
     private Socket socket;
     private EndPoint serverEndPoint;
     private Dictionary<int, string> receivedMessages;
@@ -62,6 +59,11 @@ class ClientUDP
     }
     private Message ReceiveMessage(MessageType expectedType, int timeout = 0)
     {
+        // This method handles all the generic receive message logic. when you run this you can assume the following.
+        //  1. The message is of the expected type
+        //  2. The message has content (if that type should have)
+        //  3. The message is not an error message
+        // If any of these assumptions are not true, an error will be thrown and the server will reset itself.
         byte[] data = new byte[BUFFER_SIZE];
         socket.ReceiveTimeout = timeout;
         int bytesReceived = socket.ReceiveFrom(data, ref serverEndPoint);
@@ -75,6 +77,7 @@ class ClientUDP
             HandleError($"Received Error message from server '{message.Content}'", false);
         if (expectedType == MessageType.Data && message.Type == MessageType.End)
             return message; // When we as a client want to receive Data, we can also expect an End message at any point in time
+            // therefore this is not an error, and let the caller handle it.
         
         if (message.Type != expectedType) 
             HandleError($"Expected {expectedType} message, but received {message.Type}", true);
@@ -191,7 +194,6 @@ class ClientUDP
         if (notifyServer)
             SendMessage(MessageType.Error, description);
         
-        socket.Close();
-        Environment.Exit(0);
+        EndConnection();
     }
 }

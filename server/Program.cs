@@ -1,8 +1,5 @@
-﻿using System;
-using System.Data.SqlTypes;
-using System.Net;
+﻿using System.Net;
 using System.Net.Sockets;
-using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using MessageNS;
@@ -38,20 +35,18 @@ class ServerUDP
     private string[]? fileContent; // null means no file currently being requested
     private int slowStartThreshold;
     private int currentWindowSize;
-    private int nextDataMessageId; // this-1 is last successfully recieved message. This means that if its missing an ack, the server will start from this message again.
+    private int nextDataMessageId; // this-1 is last successfully received message. This means that if its missing an ack, the server will start from this message again.
     private bool allDataSent;
-    private List<int> acksToReceive = new(); // this is a list of all the acks that we are still waiting for.
+    private List<int> acksToReceive; // this is a list of all the ack messages that we are still waiting for.
     
     public void start()
     {   
-        // DIRK: decide on what to do to get the actual root
-        // applicationDir = AppContext.BaseDirectory;
+        acksToReceive = new List<int>();
         applicationDir = Path.Combine(AppContext.BaseDirectory, "../../..");
         
         socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         socket.Bind(new IPEndPoint(IPAddress.Parse(SERVER_IP), PORT));
-
-        ResetServer(true);
+        ResetServer();
         
         // Assignment: "The server will always stay online after terminating the operation waiting for a new Hello."
         //    so that's why the infinite loop 
@@ -59,16 +54,29 @@ class ServerUDP
             try {
                 SingleServerIteration();
             } catch (Exception e) {   
-                // if there is any error (lets say Received Request before Hello), then we throw an error, and catch it here.
-                //  currently we catch ALL errors (even once we didnt make), and reset the server,
-                //  this is because the assignment states that the server should always stay online.
-                //  but a future dev could easily create its own exceptions class and only catch the ones that are thrown by the server.
+                // Explanation about decisions we made for errors, is in the HandleError method at the bottom of the code.
+                //  things like: why we throw and catch errors instead of handling them inplace,
+                //  or: why do we catch ALL errors, and not just errors we made ourselves.
                 Console.WriteLine($"Error: {e.Message}");
             }
+            // errors will just stop the current server iteration. without running the code that was still yet to run in that iteration.
+           
+            // the server will reset after every iteration, regardless if there was an error or not.
+            Console.WriteLine("Resetting server...");
             ResetServer();
         }
     }
-
+    
+    private void ResetServer()
+    {
+        currentWindowSize = 1;
+        nextDataMessageId = 1;
+        slowStartThreshold = 0;
+        fileContent = null;  
+        clientEndPoint = null;
+        acksToReceive.Clear();
+    }
+    
     private void SingleServerIteration()
     {
         ReceiveHelloMessage();
@@ -92,11 +100,12 @@ class ServerUDP
     //TODO: keep receiving messages from clients
     private Message ReceiveMessage(MessageType expectedType, int timeout = 0)
     {
-        // This message will handle the generic receive message logic (which is the same for all messages)
-        // This method will always return a message that you can asure is of the right type , and has content (if that type should have)
-        //      however, checking weather the content is valid is up to the caller. (e.g. checking if the ack content is parsable in to an int)
-        // There is 1 special case when the expectedType is MessageType.Hello, in this case we are trying to find a new client, so the the remoteEndPoint is dynamic
-        //      for all the other cases we use the clientEndPoint, and check if the received message is from the same client. to make sure its not a new client trying to interfere.
+        // This method handles all the generic receive message logic. when you run this you can assume the following.
+        //  1. The message is of the expected type
+        //  2. The message has content (if that type should have)
+        //  3. The message is from the right client (if the expectedType is not MessageType.Hello)
+        //  4. The message is not an error message
+        // If any of these assumptions are not true, an error will be thrown and the server will reset itself.
         EndPoint remoteEndPoint = expectedType == MessageType.Hello ? new IPEndPoint(IPAddress.Any, 0) : clientEndPoint!;
         
         byte[] data = new byte[BUFFER_SIZE];
@@ -111,21 +120,20 @@ class ServerUDP
         else if (clientEndPoint != remoteEndPoint)
         {
             /* Assignment: The server will communicate with only one client at a time;
-                    it cannot communicate with multiple clients simultaneously; they must interact in sequence.
+                it cannot communicate with multiple clients simultaneously; they must interact in sequence.
 
-            This is a special error case since it doesn't really make sence to reset the whole server and stop the connection
-                 when some other client tries to connect. As specially when the current connection is still prefectly fine.
-                 so instead we just let that new client know that we are buissy and dont act on it further.*/
+            This is a special error case since it doesn't really make sense to reset the whole server and stop the connection
+                 when some other client tries to connect. As specially when the current connection is still perfectly fine.
+                 so instead we just let that new client know that we are busy and dont act on it further.*/
             SendMessageTo(remoteEndPoint, MessageType.Error,  "Already connected to another client");
-            Console.WriteLine("Warning: Other client tried to connect, sent error message and ignored message.");
+            Console.WriteLine("Warning: Other client tried to connect, sent error message and ignored message. Server will continue as normal.");
             return ReceiveMessage(expectedType);
         }
         
         if (message == null)
         {
-            /* we set the clientEndPoint here even tho this clause is an exception and it should be reset to null after.
-            But we still do since this is the only Error that can happen before the clientEndPoint var is set!!
-            and in our case errors are always send to the client, so we need to know where to send this error aswell */
+            // We set the clientEndPoint here even tho this clause is an exception and it should be reset to null after.
+            // We still do it since the HandleError method needs to know where to send the error to.
             clientEndPoint = remoteEndPoint;
             HandleError("Failed to deserialize message", true);
         }
@@ -172,7 +180,6 @@ class ServerUDP
             .Chunk(DATA_CHUNK_SIZE)                  // char[][]
             .Select(chunk => new string(chunk)) // string[]
             .ToArray();                              // string[]
-        
         Console.WriteLine($"Received RequestData message from client. '{message.Content}'");
     }
  
@@ -183,11 +190,11 @@ class ServerUDP
         if (!int.TryParse(message.Content, out int ackId))
             HandleError("Failed to parse ack id", true);
         
-        // The assignment only states that missing acks are not errors. But nothing is said about acks that we are not supose to get
-        // But if it turns out we are not supose to throw an error here, we can simply do 1 of 2 things:
+        // The assignment only states that missing ack messages are not errors. But nothing is said about an ack that we are not suppose to get
+        // But if it turns out we are not suppose to throw an error here, we can simply do 1 of 2 things:
         // 1. replace this ThrowError() with a return statement.
         // 2. completely remove this clause
-        // it is implemented in a way that it does not really matter which of the 3 (thisone included) options you choose.
+        // it is implemented in a way that it does not really matter which of the 3 (this one included) options you choose.
         if (ackId < nextDataMessageId || ackId > nextDataMessageId + currentWindowSize)
             HandleError("Received ack was not send in the current window", true);
         
@@ -212,7 +219,6 @@ class ServerUDP
     {
         Console.WriteLine($"SENDING WINDOW ({currentWindowSize}): {nextDataMessageId} - {(nextDataMessageId + currentWindowSize - 1)}");
         acksToReceive.Clear();
-        
         for (int i = 0; i < currentWindowSize; i++)
             allDataSent = !SendSingleDataMessage(nextDataMessageId+i);
         
@@ -252,22 +258,22 @@ class ServerUDP
        if (notifyClient) 
            SendMessageTo(clientEndPoint!, MessageType.Error, description);
        
-       // We throw an error, this then gets caught and will reset the server.
+       // The error gets printed to the console in catch clause
+       //  (to make sure that other errors not from here also get printed to the console)
+       //  this will then stop the current server iteration.
+       throw new Exception(description);
+       
+       // WHY DO WE THROW ERRORS AND NOT JUST HANDLE THEM INPLACE?
+       //   We throw an error, this then gets caught at toplevel of the while-loop, skipping all the code was yet to run.
        //   When there is an error, you dont want all the code after it to keep running,
        //   Throwing and catching errors is easier then using return statements in every if clause that checks for an error.
        //   and is less prone to bugs since you dont have to remember to add a return statement in every if clause.
-       throw new Exception(description);
-    }
-    
-    private void ResetServer(bool firstTimeStarting = false)
-    {
-        if(!firstTimeStarting)
-            Console.WriteLine("Resetting server...");
-        currentWindowSize = 1;
-        nextDataMessageId = 1;
-        slowStartThreshold = 0;
-        fileContent = null;  
-        clientEndPoint = null;
-        acksToReceive.Clear();
+       
+       // WHY DO WE CATCH ALL ERRORS AND NOT JUST THE ONES WE MADE OURSELVES?
+       //   You normally dont `catch(Exception e)` since this will catch all errors, not differentiating between the ones.
+       //   However, we decided to catch all errors anyway, this is because the assignment states that the server should ALWAYS stay online.
+       //   But if we would only want to catch errors made by us and not all of them, then we would create our own exceptions like so:
+       //       class ServerException : Exception { }
+       //   and throw/catch them instead.
     }
 }
