@@ -43,7 +43,7 @@ class ServerUDP
         // the application "root directory"  we assume is the directory where also all the code it stored ( Assignment/server/* )
         // not where the code is actually run ( Assignment/server/bin/Debug/net6.0/* )
         // This means we have to go back 3 folders to get to the root directory, there is also an other way of doing this.
-        // which is modifying the server.csproj to copy the file to the output direction. but this seems to not fit the assignment since we are only allowed to modify this code. 
+        // which is modifying the server.csproj to copy the file to the output direction. but this seems to not fit the assignment since we are only allowed to fill in this template. 
         applicationDirectory = Path.Combine(AppContext.BaseDirectory, "../../..");
         acksToReceive = new List<int>();
         
