@@ -29,6 +29,7 @@ class ClientUDP
     private const int WINDOWSIZE_THRESHOLD = 20;
     private const int DATA_TIMEOUT_MS = 5000;
 
+    private string outputDirectory = AppContext.BaseDirectory;
     private Socket socket;
     private EndPoint serverEndPoint;
     private Dictionary<int, string> receivedMessages;
@@ -127,7 +128,7 @@ class ClientUDP
             var newFileName = fileNameWithoutExtension + "_received" + extension;
             
             // Write the file content to a file in the project directory
-            var filePath = Path.Combine(AppContext.BaseDirectory, newFileName);
+            var filePath = Path.Combine(outputDirectory, newFileName);
             File.WriteAllText(filePath, fileContent);
             
             Console.WriteLine($"File download complete! written to '{filePath}'");

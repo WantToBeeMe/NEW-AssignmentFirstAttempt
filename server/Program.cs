@@ -28,8 +28,7 @@ class ServerUDP
     private const int DATA_CHUNK_SIZE = 100;
     private const int ACK_TIMEOUT_MS = 3000;
 
-    private string applicationDir;
-    
+    private string applicationDirectory;
     private Socket socket;
     private EndPoint? clientEndPoint;
     private string[]? fileContent; // null means no file currently being requested
@@ -41,8 +40,12 @@ class ServerUDP
     
     public void start()
     {   
+        // the application "root directory"  we assume is the directory where also all the code it stored ( Assignment/server/* )
+        // not where the code is actually run ( Assignment/server/bin/Debug/net6.0/* )
+        // This means we have to go back 3 folders to get to the root directory, there is also an other way of doing this.
+        // which is modifying the server.csproj to copy the file to the output direction. but this seems to not fit the assignment since we are only allowed to modify this code. 
+        applicationDirectory = Path.Combine(AppContext.BaseDirectory, "../../..");
         acksToReceive = new List<int>();
-        applicationDir = Path.Combine(AppContext.BaseDirectory, "../../..");
         
         socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         socket.Bind(new IPEndPoint(IPAddress.Parse(SERVER_IP), PORT));
@@ -55,7 +58,7 @@ class ServerUDP
                 SingleServerIteration();
             } catch (Exception e) {   
                 // Explanation about decisions we made for errors, is in the HandleError method at the bottom of the code.
-                //  things like: why we throw and catch errors instead of handling them inplace,
+                //  things like: why we throw and catch errors instead of handling them in-place,
                 //  or: why do we catch ALL errors, and not just errors we made ourselves.
                 Console.WriteLine($"Error: {e.Message}");
             }
@@ -172,7 +175,7 @@ class ServerUDP
     private void ReceiveRequestDataMessage()
     {
         Message message = ReceiveMessage(MessageType.RequestData);
-        string filepath = Path.Combine(applicationDir, message.Content!);
+        string filepath = Path.Combine(applicationDirectory, message.Content!);
         if (!File.Exists(filepath))
             HandleError($"File '{message.Content}' not found", true);
         
@@ -263,7 +266,7 @@ class ServerUDP
        //  this will then stop the current server iteration.
        throw new Exception(description);
        
-       // WHY DO WE THROW ERRORS AND NOT JUST HANDLE THEM INPLACE?
+       // WHY DO WE THROW ERRORS AND NOT JUST HANDLE THEM IN-PLACE?
        //   We throw an error, this then gets caught at toplevel of the while-loop, skipping all the code was yet to run.
        //   When there is an error, you dont want all the code after it to keep running,
        //   Throwing and catching errors is easier then using return statements in every if clause that checks for an error.
