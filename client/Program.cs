@@ -115,29 +115,17 @@ class ClientUDP
 
     private void WriteDataToFile()
         {
-            // Sort the received messages
             var sortedMessages = receivedMessages.OrderBy(x => x.Key);
 
-            // Combine the message contents into a single string
             var fileContent = string.Concat(sortedMessages.Select(x => x.Value));
 
-            // Create a new file name (by splitting the extension, and inserting a "_received" before it)
-            var lastDotIndex = REQUESTED_FILE.LastIndexOf('.');
-            var fileNameWithoutExtension = REQUESTED_FILE.Substring(0, lastDotIndex);
-            var extension = REQUESTED_FILE.Substring(lastDotIndex);
-            var newFileName = fileNameWithoutExtension + "_received" + extension;
-            
-            // Write the file content to a file in the project directory
-            var filePath = Path.Combine(outputDirectory, newFileName);
+            var filePath = Path.Combine(outputDirectory, REQUESTED_FILE);
             File.WriteAllText(filePath, fileContent);
             
             Console.WriteLine($"File download complete! written to '{filePath}'.");
         }
-    
-    
+
     //TODO: [Receive Data]
-    // // FOR TESTING:
-    // private List<int> ignoredAcks = new();
     private void ReceiveDataMessage()
     {
         Message message;
@@ -170,14 +158,6 @@ class ClientUDP
         receivedMessages[ackIndex] = content;
         Console.WriteLine($"Received Data message with index {ackIndex}, sending ack back to server.");
         
-        // // FOR TESTING:
-        // var ignoring = new List<int> {3};
-        // if(ignoring.Contains(ackIndex) && !ignoredAcks.Contains(ackIndex))
-        // {
-        //     ignoredAcks.Add(ackIndex);
-        //     Console.WriteLine($"Ignoring ack {ackIndex}");
-        //     return;
-        // }
         SendMessage(MessageType.Ack, ackIndex.ToString());
     }
     

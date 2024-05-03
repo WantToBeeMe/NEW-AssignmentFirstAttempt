@@ -135,7 +135,7 @@ class ServerUDP
         
         if (message == null)
         {
-            // We set the clientEndPoint here even tho this clause is an exception and it should be reset to null after.
+            // We set the clientEndPoint here even though this clause is an exception and it should be reset to null after.
             // We still do it since the HandleError method needs to know where to send the error to.
             clientEndPoint = remoteEndPoint;
             HandleError("Failed to deserialize message.", true);
@@ -193,13 +193,11 @@ class ServerUDP
         if (!int.TryParse(message.Content, out int ackId))
             HandleError("Failed to parse ack id", true);
         
-        // The assignment only states that missing ack messages are not errors. But nothing is said about an ack that we are not suppose to get
-        // But if it turns out we are not suppose to throw an error here, we can simply do 1 of 2 things:
-        // 1. replace this ThrowError() with a return statement.
-        // 2. completely remove this clause
-        // it is implemented in a way that it does not really matter which of the 3 (this one included) options you choose.
-        if (ackId < nextDataMessageId || ackId > nextDataMessageId + currentWindowSize)
-            HandleError($"Received ack ({ackId}) was not send in the current window.", true);
+        // // The assignment only states that missing ack messages are not errors. But nothing is said about an ack that we are not suppose to get
+        // // But if it turns out we are supposed to throw an error here, we can simply:
+        // // uncomment the if statement below 
+        // if (ackId < nextDataMessageId || ackId > nextDataMessageId + currentWindowSize)
+        //     HandleError($"Received ack ({ackId}) was not send in the current window.", true);
         
         Console.WriteLine($"Received Ack from client. (id {ackId})");
         acksToReceive.Remove(ackId);
@@ -220,7 +218,6 @@ class ServerUDP
     //TODO: [Implement your slow-start algorithm considering the threshold]
     private void SingleAlgorithmStep()
     {
-        // Console.WriteLine($"SENDING WINDOW ({currentWindowSize}): {nextDataMessageId} - {(nextDataMessageId + currentWindowSize - 1)}");
         acksToReceive.Clear();
         for (int i = 0; i < currentWindowSize; i++)
             allDataSent = !SendSingleDataMessage(nextDataMessageId+i);
