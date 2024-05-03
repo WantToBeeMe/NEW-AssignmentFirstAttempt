@@ -128,7 +128,7 @@ class ServerUDP
             This is a special error case since it doesn't really make sense to reset the whole server and stop the connection
                  when some other client tries to connect. As specially when the current connection is still perfectly fine.
                  so instead we just let that new client know that we are busy and dont act on it further.*/
-            SendMessageTo(remoteEndPoint, MessageType.Error,  "Already connected to another client");
+            SendMessageTo(remoteEndPoint, MessageType.Error,  "Already connected to another client.");
             Console.WriteLine("Warning: Other client tried to connect, sent error message and ignored message. Server will continue as normal.");
             return ReceiveMessage(expectedType);
         }
@@ -138,17 +138,17 @@ class ServerUDP
             // We set the clientEndPoint here even tho this clause is an exception and it should be reset to null after.
             // We still do it since the HandleError method needs to know where to send the error to.
             clientEndPoint = remoteEndPoint;
-            HandleError("Failed to deserialize message", true);
+            HandleError("Failed to deserialize message.", true);
         }
         
         if(message!.Type == MessageType.Error) 
-            HandleError($"Received Error message from client '{message.Content}'", false);
+            HandleError($"Received Error message from client '{message.Content}'.", false);
         if (message.Type != expectedType) 
-            HandleError($"Expected {expectedType} message, but received {message.Type}", true);
+            HandleError($"Expected '{expectedType}' message, but received '{message.Type}' from client.", true);
         if (message.Type != MessageType.End && message.Type != MessageType.Welcome)
         { // END and WELCOME are the only 2 message types that dont have content
             if (string.IsNullOrEmpty(message.Content)) 
-                HandleError("Received empty message, expected there to be content", true);
+                HandleError("Received empty message from client, expected there to be content.", true);
         }
        
         return message;
@@ -166,9 +166,9 @@ class ServerUDP
     {
         Message message = ReceiveMessage(MessageType.Hello);
         if (!int.TryParse(message.Content, out slowStartThreshold))
-            HandleError("Failed to parse slow start threshold", true);
+            HandleError("Failed to parse slow start threshold.", true);
         
-        Console.WriteLine($"Received Hello message ({slowStartThreshold})");
+        Console.WriteLine($"Received Hello message from client. (threshold set to: {slowStartThreshold})");
     }
     
     //TODO: [Receive RequestData]
@@ -177,13 +177,13 @@ class ServerUDP
         Message message = ReceiveMessage(MessageType.RequestData);
         string filepath = Path.Combine(applicationDirectory, message.Content!);
         if (!File.Exists(filepath))
-            HandleError($"File '{message.Content}' not found", true);
+            HandleError($"File '{message.Content}' not found.", true);
         
         fileContent = File.ReadAllText(filepath)     // string
             .Chunk(DATA_CHUNK_SIZE)                  // char[][]
             .Select(chunk => new string(chunk)) // string[]
             .ToArray();                              // string[]
-        Console.WriteLine($"Received RequestData message from client. '{message.Content}'");
+        Console.WriteLine($"Received RequestData message from client. (requesting: '{message.Content}')");
     }
  
     //TODO: [Receive Ack]
@@ -199,9 +199,9 @@ class ServerUDP
         // 2. completely remove this clause
         // it is implemented in a way that it does not really matter which of the 3 (this one included) options you choose.
         if (ackId < nextDataMessageId || ackId > nextDataMessageId + currentWindowSize)
-            HandleError("Received ack was not send in the current window", true);
+            HandleError($"Received ack ({ackId}) was not send in the current window.", true);
         
-        Console.WriteLine($"Received Ack for message {ackId}");
+        Console.WriteLine($"Received Ack from client. (id {ackId})");
         acksToReceive.Remove(ackId);
     }
     
@@ -212,7 +212,7 @@ class ServerUDP
         string stringId = dataMessageId.ToString("D4");
         string content = fileContent![dataMessageId - 1];
         SendMessageTo(clientEndPoint!, MessageType.Data, $"{stringId}{content}");
-        Console.WriteLine($"SEND - {stringId}: {content.Replace("\n", "\\n")}");
+        Console.WriteLine($"Sending Data to client (id {stringId}): {content.Replace("\n", "\\n")}");
         acksToReceive.Add(dataMessageId);
         return true;
     }
@@ -220,7 +220,7 @@ class ServerUDP
     //TODO: [Implement your slow-start algorithm considering the threshold]
     private void SingleAlgorithmStep()
     {
-        Console.WriteLine($"SENDING WINDOW ({currentWindowSize}): {nextDataMessageId} - {(nextDataMessageId + currentWindowSize - 1)}");
+        // Console.WriteLine($"SENDING WINDOW ({currentWindowSize}): {nextDataMessageId} - {(nextDataMessageId + currentWindowSize - 1)}");
         acksToReceive.Clear();
         for (int i = 0; i < currentWindowSize; i++)
             allDataSent = !SendSingleDataMessage(nextDataMessageId+i);

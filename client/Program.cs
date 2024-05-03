@@ -81,12 +81,12 @@ class ClientUDP
             // therefore this is not an error, and let the caller handle it.
         
         if (message.Type != expectedType) 
-            HandleError($"Expected {expectedType} message, but received {message.Type}", true);
+            HandleError($"Expected '{expectedType}' message, but received '{message.Type}' from server.", true);
 
         if (message.Type != MessageType.End && message.Type != MessageType.Welcome)
         { // END and WELCOME are the only 2 message types that dont have content
             if (string.IsNullOrEmpty(message.Content)) 
-                HandleError("Received empty message, expected there to be content", true);
+                HandleError("Received empty message, expected there to be content.", true);
         }
        
         return message;
@@ -131,7 +131,7 @@ class ClientUDP
             var filePath = Path.Combine(outputDirectory, newFileName);
             File.WriteAllText(filePath, fileContent);
             
-            Console.WriteLine($"File download complete! written to '{filePath}'");
+            Console.WriteLine($"File download complete! written to '{filePath}'.");
         }
     
     
@@ -162,13 +162,13 @@ class ClientUDP
         }
         
         if (message.Content!.Length < 4) 
-            HandleError("Received Data message with invalid content", true);
+            HandleError("Received Data message with invalid content.", true);
         if (!int.TryParse(message.Content.Substring(0, 4), out int ackIndex)) 
-            HandleError("Received Data message with invalid index", true);
+            HandleError("Received Data message with invalid index.", true);
         string content = message.Content!.Substring(4);
 
         receivedMessages[ackIndex] = content;
-        Console.WriteLine($"Received Data message with index {ackIndex}");
+        Console.WriteLine($"Received Data message with index {ackIndex}, sending ack back to server.");
         
         // // FOR TESTING:
         // var ignoring = new List<int> {3};
@@ -183,7 +183,7 @@ class ClientUDP
     
     private void EndConnection()
     {
-        Console.WriteLine("Connection to the server will be ended");
+        Console.WriteLine("Connection to the server will be ended.");
         socket.Close();
         Environment.Exit(0);
     }
